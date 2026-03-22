@@ -270,11 +270,22 @@ async def handle_message(websocket, message):
     except Exception as e:
         print(f"Error handling message: {e}")
 
+# --- Configuration & Paths ---
+if OS_TYPE == "Windows":
+    APP_DIR = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'PolygolDesktopCompanion')
+else:
+    APP_DIR = os.path.expanduser('~/.polygol_companion')
+
+CONFIG_FILE = os.path.join(APP_DIR, 'config.json')
+
 # Global config cache
 SYSLINK_CONFIG = {}
 if os.path.exists(CONFIG_FILE):
-    with open(CONFIG_FILE, 'r') as f:
-        SYSLINK_CONFIG = json.load(f)
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            SYSLINK_CONFIG = json.load(f)
+    except Exception:
+        SYSLINK_CONFIG = {}
 
 async def handler(websocket):
     global SYSLINK_CONFIG
@@ -326,14 +337,6 @@ async def handler(websocket):
         print(f"Client disconnected: {websocket.remote_address[0]}")
     finally:
         stats_task.cancel()
-
-# --- Configuration & Paths ---
-if OS_TYPE == "Windows":
-    APP_DIR = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'PolygolDesktopCompanion')
-else:
-    APP_DIR = os.path.expanduser('~/.polygol_companion')
-
-CONFIG_FILE = os.path.join(APP_DIR, 'config.json')
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
