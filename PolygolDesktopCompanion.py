@@ -1,4 +1,4 @@
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 import asyncio
 import websockets
@@ -270,14 +270,60 @@ async def handle_message(websocket, message):
     except Exception as e:
         print(f"Error handling message: {e}")
 
+# Global config cache
+SYSLINK_CONFIG = {}
+if os.path.exists(CONFIG_FILE):
+    with open(CONFIG_FILE, 'r') as f:
+        SYSLINK_CONFIG = json.load(f)
+
 async def handler(websocket):
-    print("--- Polygol connected ---")
+    global SYSLINK_CONFIG
+    expected_token = SYSLINK_CONFIG.get("auth_token")
+    
+    try:
+        # Increase timeout to 5 seconds for slower networks
+        auth_payload_raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+        auth_payload = json.loads(auth_payload_raw)
+        
+        client_token = auth_payload.get("token")
+        
+        if auth_payload.get("module") == "auth" and client_token == expected_token:
+            await websocket.send(json.dumps({"module": "auth", "status": "success", "version": VERSION}))
+            print(f"[Auth] Success: {websocket.remote_address[0]}")
+        else:
+            print(f"[Auth] Failed: Invalid token from {websocket.remote_address[0]}")
+            await websocket.send(json.dumps({"module": "auth", "status": "failed"}))
+            await websocket.close()
+            return
+    except Exception as e:
+        print(f"[Auth] Error during handshake: {e}")
+        await websocket.close()
+        return
+
+    try:
+        # Wait for the first message which MUST be the auth token
+        # If no auth received within 3 seconds, drop connection
+        auth_payload_raw = await asyncio.wait_for(websocket.recv(), timeout=3.0)
+        auth_payload = json.loads(auth_payload_raw)
+        
+        if auth_payload.get("module") == "auth" and auth_payload.get("token") == expected_token:
+            authenticated = True
+            await websocket.send(json.dumps({"module": "auth", "status": "success", "version": VERSION}))
+            print(f"--- Client Authenticated: {websocket.remote_address[0]} ---")
+        else:
+            await websocket.send(json.dumps({"module": "auth", "status": "failed"}))
+            await websocket.close()
+            return
+    except Exception:
+        await websocket.close()
+        return
+
     stats_task = asyncio.create_task(broadcast_state(websocket))
     try:
         async for message in websocket:
             await handle_message(websocket, message)
     except websockets.exceptions.ConnectionClosed:
-        print("Polygol disconnected.")
+        print(f"Client disconnected: {websocket.remote_address[0]}")
     finally:
         stats_task.cancel()
 
@@ -320,7 +366,7 @@ def run_setup():
 
     root = tk.Tk()
     root.title("Polygol Desktop Companion Setup")
-    root.geometry("450x250")
+    root.geometry("450x300")
     root.eval('tk::PlaceWindow . center')
     root.configure(bg="#1c1c1c")
 
@@ -338,9 +384,12 @@ def run_setup():
     tk.Checkbutton(root, text="Run at Startup", variable=startup_var, bg="#1c1c1c", fg="#ffffff", selectcolor="#333333", activebackground="#1c1c1c").pack(anchor="w", padx=80)
 
     def on_save():
+        import secrets
         os.makedirs(APP_DIR, exist_ok=True)
+        # Generate a 32-character secure token
+        token = secrets.token_hex(16)
         with open(CONFIG_FILE, 'w') as f:
-            json.dump({"setup_done": True}, f)
+            json.dump({"setup_done": True, "auth_token": token}, f)
 
         target_exe = sys.executable
         is_frozen = getattr(sys, 'frozen', False)
@@ -410,11 +459,17 @@ def run_tray():
 
     def on_show_ip(icon, item):
         if tk:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+            token = config.get("auth_token")
             root = tk.Tk()
             root.withdraw()
-            messagebox.showinfo("Polygol Desktop Companion", f"Local IP:\n{get_local_ip()}\n\nEnter this in the Polygol Settings app.")
+            messagebox.showinfo("SysLink Security Info", 
+                                f"Host IP: {get_local_ip()}\n\n"
+                                f"PIN: {token}\n\n"
+                                "Enter these in Polygol Settings > Connections > Polygol Desktop to connect.")
             root.destroy()
-
+            
     def on_exit(icon, item):
         icon.stop()
         os._exit(0) 
