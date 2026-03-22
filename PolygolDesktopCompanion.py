@@ -270,46 +270,13 @@ async def handle_message(websocket, message):
     except Exception as e:
         print(f"Error handling message: {e}")
 
-# --- Configuration & Paths ---
-if OS_TYPE == "Windows":
-    APP_DIR = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'PolygolDesktopCompanion')
-else:
-    APP_DIR = os.path.expanduser('~/.polygol_companion')
-
-CONFIG_FILE = os.path.join(APP_DIR, 'config.json')
-
-# Global config cache
-SYSLINK_CONFIG = {}
-if os.path.exists(CONFIG_FILE):
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            SYSLINK_CONFIG = json.load(f)
-    except Exception:
-        SYSLINK_CONFIG = {}
-
 async def handler(websocket):
-    global SYSLINK_CONFIG
-    expected_token = SYSLINK_CONFIG.get("auth_token")
+    # Security: Read the token from config
+    with open(CONFIG_FILE, 'r') as f:
+        config = json.load(f)
     
-    try:
-        # Increase timeout to 5 seconds for slower networks
-        auth_payload_raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-        auth_payload = json.loads(auth_payload_raw)
-        
-        client_token = auth_payload.get("token")
-        
-        if auth_payload.get("module") == "auth" and client_token == expected_token:
-            await websocket.send(json.dumps({"module": "auth", "status": "success", "version": VERSION}))
-            print(f"[Auth] Success: {websocket.remote_address[0]}")
-        else:
-            print(f"[Auth] Failed: Invalid token from {websocket.remote_address[0]}")
-            await websocket.send(json.dumps({"module": "auth", "status": "failed"}))
-            await websocket.close()
-            return
-    except Exception as e:
-        print(f"[Auth] Error during handshake: {e}")
-        await websocket.close()
-        return
+    expected_token = config.get("auth_token")
+    authenticated = False
 
     try:
         # Wait for the first message which MUST be the auth token
@@ -337,6 +304,14 @@ async def handler(websocket):
         print(f"Client disconnected: {websocket.remote_address[0]}")
     finally:
         stats_task.cancel()
+
+# --- Configuration & Paths ---
+if OS_TYPE == "Windows":
+    APP_DIR = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'PolygolDesktopCompanion')
+else:
+    APP_DIR = os.path.expanduser('~/.polygol_companion')
+
+CONFIG_FILE = os.path.join(APP_DIR, 'config.json')
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
